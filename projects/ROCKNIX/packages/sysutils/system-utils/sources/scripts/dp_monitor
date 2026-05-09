@@ -2,39 +2,59 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Copyright (C) 2025 ROCKNIX (https://github.com/ROCKNIX)
 #
-# Monitors DP-1 output via sway IPC and powers DSI-1 (internal panel)
-# off/on when DP-1 is enabled/disabled. Needed for USB-C DisplayPort
-# Alt Mode (e.g. RK3576) where the DP driver does not emit a DRM
-# connector hotplug uevent, making the standard udev/hdmi_sense path
-# unreliable.
+# Monitors external display outputs (DP, HDMI) via sway IPC and powers
+# internal panels (DSI, eDP) off/on accordingly. Needed for connections
+# where the kernel driver does not emit a DRM connector hotplug uevent
+# (e.g. RK3576 USB-C DP Alt Mode), making the standard udev/hdmi_sense
+# path unreliable.
+#
+# inotifyd cannot be used here: sysfs pseudo-files do not generate
+# inotify events when their content changes (the kernel updates them
+# in-memory, not via the VFS write path).
 
 . /etc/profile
 
-# Only needed on devices that have DP-1 hardware
-[ -d /sys/class/drm/card0-DP-1 ] || exit 0
+# Exit if this device has no external display connectors at all
+ls /sys/class/drm/card*-DP-* /sys/class/drm/card*-HDMI-A-* 2>/dev/null | grep -q . || exit 0
 
 _LAST_STATE="init"
 
+_get_active_externals() {
+    wlr-randr 2>/dev/null | awk '
+        /^(DP|HDMI|DisplayPort)-/ { name=$1; in_ext=1; next }
+        /^[A-Za-z]/ { in_ext=0 }
+        in_ext && /Enabled: yes/ { print name }
+    '
+}
+
+_get_all_internals() {
+    wlr-randr 2>/dev/null | awk '/^(DSI|eDP|LVDS)-/ { print $1 }'
+}
+
 _apply() {
-    local state="dsi"
-    wlr-randr 2>/dev/null | grep -A7 "^DP-1" | grep -q "Enabled: yes" && state="dp"
+    local state="internal"
+    [ -n "$(_get_active_externals)" ] && state="external"
     [ "$_LAST_STATE" = "$state" ] && return
     local prev="$_LAST_STATE"
     _LAST_STATE="$state"
 
-    if [ "$state" = "dp" ]; then
-        wlr-randr --output DSI-1 --off 2>/dev/null
-        # Stop USB gadget when DP is via USB-C Alt Mode (data lane conflict)
-        if cat /sys/class/drm/card*-DP*/status /sys/class/drm/card*-DisplayPort*/status 2>/dev/null | grep -q "^connected"; then
-            systemctl is-active --quiet usbgadget && systemctl stop usbgadget
-        fi
+    if [ "$state" = "external" ]; then
+        while IFS= read -r out; do
+            wlr-randr --output "$out" --off 2>/dev/null
+        done < <(_get_all_internals)
+        # Stop USB gadget: its data lanes conflict with DP Alt Mode on RK3576
+        systemctl is-active --quiet usbgadget && systemctl stop usbgadget
     else
-        # Only re-enable DSI-1 on actual disconnect, not on first-boot detection
-        [ "$prev" != "init" ] && wlr-randr --output DSI-1 --preferred --on 2>/dev/null
+        # Only re-enable internal panels on actual disconnect, not first-boot
+        if [ "$prev" != "init" ]; then
+            while IFS= read -r out; do
+                wlr-randr --output "$out" --preferred --on 2>/dev/null
+            done < <(_get_all_internals)
+        fi
     fi
 
     # Restart ES so it re-initialises at the new output's resolution.
-    # Skip on first-boot detection (init→dp/dsi) since ES hasn't started yet.
+    # Skip on first-boot detection (init→external/internal) since ES hasn't started yet.
     [ "$prev" != "init" ] && killall emulationstation 2>/dev/null
 }
 
