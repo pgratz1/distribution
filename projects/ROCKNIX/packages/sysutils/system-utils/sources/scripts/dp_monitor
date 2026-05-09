@@ -39,9 +39,14 @@ _apply() {
     _LAST_STATE="$state"
 
     if [ "$state" = "external" ]; then
+        local ext_out
+        ext_out=$(_get_active_externals | head -1)
         while IFS= read -r out; do
             wlr-randr --output "$out" --off 2>/dev/null
         done < <(_get_all_internals)
+        if [ -n "$ext_out" ]; then
+            swaymsg "[app_id=\"emulationstation\"] move output ${ext_out}" 2>/dev/null || true
+        fi
         # Stop USB gadget: its data lanes conflict with DP Alt Mode on RK3576
         systemctl is-active --quiet usbgadget && systemctl stop usbgadget
     else
