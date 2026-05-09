@@ -65,10 +65,10 @@ sleep 3
 
 while true; do
     _apply
-    # Block until sway reports an output event, then loop immediately.
-    # grep -q exits on first '"change"' match, breaking the pipe and
-    # terminating swaymsg cleanly.  '|| true' keeps the loop running
-    # if sway disconnects.
-    swaymsg -t subscribe '["output"]' 2>/dev/null | grep -q '"change"' || true
+    # Block until sway reports an output event (or 10s timeout).
+    # The timeout acts as a periodic retry to catch events missed when sway
+    # fires before finishing output configuration (e.g. boot-time hotplug).
+    # grep -q exits on first '"change"' match, terminating swaymsg cleanly.
+    timeout 10 swaymsg -t subscribe '["output"]' 2>/dev/null | grep -q '"change"' || true
     sleep 0.3
 done
