@@ -53,9 +53,7 @@ _apply() {
         fi
     fi
 
-    # Restart ES so it re-initialises at the new output's resolution.
-    # Skip on first-boot detection (init→external/internal) since ES hasn't started yet.
-    [ "$prev" != "init" ] && killall emulationstation 2>/dev/null
+
 }
 
 # Allow sway to finish initialising outputs before first check
