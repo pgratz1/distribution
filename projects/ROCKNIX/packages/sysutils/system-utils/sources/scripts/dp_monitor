@@ -3,14 +3,13 @@
 # Copyright (C) 2025 ROCKNIX (https://github.com/ROCKNIX)
 #
 # Monitors external display outputs (DP, HDMI) via sway IPC and powers
-# internal panels (DSI, eDP) off/on accordingly. Needed for connections
-# where the kernel driver does not emit a DRM connector hotplug uevent
-# (e.g. RK3576 USB-C DP Alt Mode), making the standard udev/hdmi_sense
-# path unreliable.
+# internal panels (DSI, eDP) off/on accordingly.
 #
-# inotifyd cannot be used here: sysfs pseudo-files do not generate
-# inotify events when their content changes (the kernel updates them
-# in-memory, not via the VFS write path).
+# The sway IPC subscription is used rather than udev because the actions
+# (wlr-randr, swaymsg) require sway to be running and to have already
+# processed the new output. Subscribing to sway output events is
+# inherently synchronized with sway's internal state, avoiding the need
+# for retry logic after a kernel hotplug uevent.
 
 . /etc/profile
 
