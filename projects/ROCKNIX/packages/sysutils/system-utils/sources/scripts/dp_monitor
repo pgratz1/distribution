@@ -17,6 +17,7 @@
 ls /sys/class/drm/card*-DP-* /sys/class/drm/card*-HDMI-A-* 2>/dev/null | grep -q . || exit 0
 
 _LAST_STATE="init"
+_SAVED_AUDIO_SINK=""
 
 _get_active_externals() {
     wlr-randr 2>/dev/null | awk '
@@ -28,6 +29,13 @@ _get_active_externals() {
 
 _get_all_internals() {
     wlr-randr 2>/dev/null | awk '/^(DSI|eDP|LVDS)-/ { print $1 }'
+}
+
+# Returns the PipeWire sink for DP audio (hdmi-audio-codec on 27e40000.dp).
+# The sink node name includes the DP controller address after the framework
+# creates an hdmi-audio-codec platform device at probe time.
+_get_dp_audio_sink() {
+    pactl list short sinks 2>/dev/null | awk '/27e40000/ { print $2; exit }'
 }
 
 _apply() {
@@ -48,12 +56,20 @@ _apply() {
         fi
         # Stop USB gadget: its data lanes conflict with DP Alt Mode on RK3576
         systemctl is-active --quiet usbgadget && systemctl stop usbgadget
+        # Switch audio output to DP sink; save current default to restore later
+        local dp_sink
+        _SAVED_AUDIO_SINK=$(pactl get-default-sink 2>/dev/null || true)
+        dp_sink=$(_get_dp_audio_sink)
+        [ -n "$dp_sink" ] && pactl set-default-sink "$dp_sink" 2>/dev/null || true
     else
         # Only re-enable internal panels on actual disconnect, not first-boot
         if [ "$prev" != "init" ]; then
             while IFS= read -r out; do
                 wlr-randr --output "$out" --preferred --on 2>/dev/null
             done < <(_get_all_internals)
+            # Restore saved audio sink
+            [ -n "$_SAVED_AUDIO_SINK" ] && pactl set-default-sink "$_SAVED_AUDIO_SINK" 2>/dev/null || true
+            _SAVED_AUDIO_SINK=""
         fi
     fi
 
